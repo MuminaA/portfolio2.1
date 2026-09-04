@@ -267,7 +267,7 @@ void main() {
   gl_PointSize = min(
     uSize * (0.72 + aRand * 0.56) * (0.62 + aBloom * 0.66 + aFlash * 0.30)
       * uDpr * (26.0 / max(-mv.z, 0.001)),
-    64.0 * uDpr
+    44.0 * uDpr
   );
 }
 `
@@ -437,7 +437,7 @@ function buildFlowers(count: number) {
        height on near-flat ground, so in screen space anything much past ten units
        piles into a thin band at the horizon; the bias spreads them down the frame
        and keeps them somewhere the trail can actually be steered through.       */
-    const z = 4 - 11 * Math.pow(u, 1.5)
+    const z = 2 - 10 * Math.pow(u, 1.5)
     // Roughly the frustum's own spread, so the edges stay inside where the petal
     // can actually be steered rather than sitting off in the wings.
     const halfX = 1.5 + (NEAR_Z - z) * 0.6
@@ -748,7 +748,11 @@ function Scene({ reduced, tier }: SceneProps) {
 
   /* The head of the petal trail, and its recent history. Petal i samples the
      history at a delay proportional to i, which is what makes the ribbon. */
-  const HIST = 420
+  /* About three seconds of head positions. Longer is not better now that petals
+     are spaced by arc length: when the head runs out of travelled distance the
+     remaining petals pile up on the oldest sample, so a long buffer leaves a
+     clump sitting wherever the cursor was ages ago. */
+  const HIST = 180
   const trail = useRef({
     head: new THREE.Vector3(0, 1.4, 2),
     hist: new Float32Array(HIST * 3),
@@ -903,24 +907,49 @@ function Scene({ reduced, tier }: SceneProps) {
     const rndArr = petalGeo.attributes.aRand.array as Float32Array
     const available = t.filled ? HIST : Math.max(t.write, 1)
     const time = shared.uTime.value
-    const lagStep = (HIST - 24) / petalCount
+
+    /* Petals are spaced along the *distance the head has travelled*, not along
+       frame count. Spacing by frames means the ribbon's length is however far the
+       cursor happened to move in the last few seconds: hold still and the petals
+       pile up, sweep quickly and the same petals string out into a single-file
+       thread with visible gaps between them. Arc length gives the trail one
+       consistent shape at any speed.
+
+       The span scales with the head's distance from the camera so the ribbon
+       covers roughly the same slice of the screen whether it is at your feet or
+       out by the hills.                                                         */
+    const span = e.reach * 0.5
+    const step = span / petalCount
+    // Volume also scales with distance, or far petals collapse onto a wire.
+    const bodyScale = 0.1 + e.reach * 0.06
+
+    let idx = (t.write - 1 + HIST) % HIST
+    let walked = 0
+    let acc = 0
 
     // Slot order is draw order. Slot 0 is the far tail and slot n-1 is the head,
-    // so the newest petals paint over the oldest. Because the lag is derived
-    // from the slot rather than shuffled into it, aRand can stay static — colour
-    // and size remain pinned to their petal and the buffer is never rewritten.
-    for (let s = 0; s < petalCount; s++) {
-      const i = petalCount - 1 - s
+    // so the newest petals paint over the oldest. `k` counts back from the head,
+    // and because it is derived from the slot rather than shuffled into it, aRand
+    // stays static — colour and size stay pinned to their petal.
+    for (let k = 0; k < petalCount; k++) {
+      const s = petalCount - 1 - k
       const r = rndArr[s]
 
-      // Step is derived from the count so the trail spans the same slice of
-      // history on both tiers — a fixed step leaves the low tier in a tight clump.
-      const lag = Math.min(available - 1, Math.round(i * lagStep + r * lagStep * 0.9))
-      const idx = (t.write - 1 - lag + HIST * 2) % HIST
+      // Walk back through history until this petal is far enough behind the head.
+      const want = (k + r * 0.9) * step
+      while (acc < want && walked < available - 1) {
+        const prev = (idx - 1 + HIST) % HIST
+        const dx = t.hist[idx * 3 + 0] - t.hist[prev * 3 + 0]
+        const dy = t.hist[idx * 3 + 1] - t.hist[prev * 3 + 1]
+        const dz = t.hist[idx * 3 + 2] - t.hist[prev * 3 + 2]
+        acc += Math.sqrt(dx * dx + dy * dy + dz * dz)
+        idx = prev
+        walked++
+      }
 
       // A private orbit per petal, so the ribbon has volume instead of being a wire.
       const ph = r * 90
-      const spread = 0.18 + (i / petalCount) * 0.85
+      const spread = (0.18 + (k / petalCount) * 0.85) * bodyScale
       posArr[s * 3 + 0] = t.hist[idx * 3 + 0] + Math.sin(time * (0.7 + r * 0.8) + ph) * spread
       posArr[s * 3 + 1] =
         t.hist[idx * 3 + 1] + Math.cos(time * (0.55 + r * 0.6) + ph * 1.3) * spread * 0.7

@@ -113,9 +113,13 @@ petals cannot climb into the sky, so they can never follow the cursor over the
 top half of the screen. The floor is load-bearing: with depth testing off, a
 head that sinks under the earth still draws on top of it.
 
-**The petal trail** is a CPU ring buffer of recent head positions. Petal *i*
-samples that history at a lag proportional to *i*, so the ribbon trails behind
-the cursor, with a private noise orbit per petal to give it volume.
+**The petal trail** is a CPU ring buffer of recent head positions. Petals are
+spaced along the *distance the head has travelled*, not along frame count — the
+loop walks back through the buffer accumulating arc length. Spacing by frames
+makes the ribbon's length depend on how fast the cursor happened to be moving,
+so a quick sweep strings the petals out into a single-file thread with gaps
+between them. Each petal also gets a private noise orbit to give the ribbon
+volume, scaled with distance so it does not collapse onto a wire.
 
 **One palette, two consumers.** `src/lib/palette.ts` holds three colour stops.
 `applyWorldVars()` lerps them in sRGB and writes CSS custom properties;
