@@ -56,7 +56,7 @@ export const SECTIONS: Section[] = [
     id: 'reach',
     title: 'Reach',
     plain: 'Contact',
-    lede: 'Open to new-grad and early-career software roles. The inbox is quiet and I answer it.',
+    lede: 'Open to early-career software roles. The inbox is quiet and I answer it.',
     scheme: 'light',
   },
 ]
@@ -67,7 +67,7 @@ export const ME = {
   tagline: 'Games got me into code. Backend services are what keep me here.',
   // PLACEHOLDER — the résumé lists a Michigan number and Michigan State, but
   // the AWS role is in Seattle. Set this to wherever you want to be reached.
-  location: 'Seattle, WA',
+  location: 'Grand Rapids, MI',
   status: 'Open to work',
   bio: [
     'I am a software engineer who came in through games. I studied Games and Interactive Media at Michigan State, which is where I learned that the interesting part of a system is usually the part the player never sees — and I have been chasing that part ever since.',

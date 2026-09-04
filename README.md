@@ -99,7 +99,16 @@ rolling outward. There is no lighting and no post-processing.
 
 Depth testing is off throughout — thin alpha lines and a depth buffer do not
 mix — so **draw order is the sort order**. The blades are sorted far-to-near at
-build time, and the three layers carry explicit `renderOrder` values.
+build time, and the layers carry explicit `renderOrder` values.
+
+The materials are constructed by hand rather than declared as
+`<shaderMaterial uniforms={...} />`, and that is deliberate: R3F does not adopt
+a `uniforms` prop, it copies each entry into the material's own uniform objects.
+Object values survive that (a `Color` is copied by reference, so mutating it in
+place still reaches the shader) but **numbers are copied by value and then
+frozen for the life of the material** — which silently stops the clock, the wind
+and every scalar the frame loop writes. Building the material directly makes
+`material.uniforms` the very object being written to.
 
 **The flowers** are buds until something comes near, then they snap open with a
 flash and wilt shut once you leave. Two details matter: the open and close radii

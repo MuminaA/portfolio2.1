@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
-import { GUST, NOISE, ROT2, WIND } from '../lib/glsl'
+import { GUST, NOISE, PETAL_TINT, ROT2, WIND } from '../lib/glsl'
 import { COLOR_KEYS, STOPS, segmentAt } from '../lib/palette'
 import type { ColorKey } from '../lib/palette'
 import { prefersReducedMotion, tracker } from '../lib/tracker'
@@ -187,11 +187,13 @@ void main() {
 const PETAL_FRAG = /* glsl */ `
 uniform vec3 uPetal;
 uniform vec3 uPetalLight;
+uniform float uTint;
 
 varying float vAngle;
 varying float vRand;
 
 ${ROT2}
+${PETAL_TINT}
 
 void main() {
   vec2 q = rot2(vAngle) * ((gl_PointCoord - 0.5) * 2.0);
@@ -205,9 +207,99 @@ void main() {
   float m = 1.0 - smoothstep(0.52, 1.0, d);
   if (m <= 0.004) discard;
 
-  // Only a touch of the pale tone. Biased white, they stop reading as petals.
-  vec3 col = mix(uPetal, uPetalLight, vRand * 0.34 + (1.0 - k) * 0.16);
+  /* Only a touch of the pale tone. Biased white, they stop reading as petals —
+     and the whitening is backed off as the tint comes in, because a hue laid over
+     a near-white base is a hue you cannot see. */
+  float pale = (vRand * 0.34 + (1.0 - k) * 0.16) * (1.0 - uTint * 0.55);
+  vec3 col = mix(uPetal, uPetalLight, pale);
+  // Each petal picks its own hue once the sun is up. See petalTint.
+  col = petalTint(col, vRand, uTint);
   gl_FragColor = vec4(col, m * (0.72 + vRand * 0.22));
+  #include <colorspace_fragment>
+}
+`
+
+/* ── fireflies ──────────────────────────────────────────────────────────────
+   Only alive while the field is dark. They fade out well before the palette
+   reaches daylight, because a glowing dot on a bright sky is not a firefly, it
+   is a dust speck on the lens — and because them leaving as the sun arrives is
+   the point. All the motion is in the vertex shader; the CPU never touches them
+   after they are scattered.                                                    */
+
+const FIREFLY_VERT = /* glsl */ `
+attribute float aRand;
+attribute float aBlink;
+
+uniform float uTime;
+uniform float uSize;
+uniform float uDpr;
+
+varying float vRand;
+varying float vPulse;
+varying float vNear;
+
+void main() {
+  float ph = aRand * 62.83;
+
+  // A wandering lissajous rather than a straight drift, so no two follow the
+  // same path and none of them ever quite arrives anywhere.
+  vec3 p = position;
+  float t = uTime * (0.09 + aRand * 0.13);
+  p.x += sin(t * 2.1 + ph) * (0.8 + aRand * 1.5);
+  p.y += sin(t * 1.4 + ph * 1.7) * (0.30 + aRand * 0.45);
+  p.z += cos(t * 1.7 + ph * 0.6) * (0.6 + aRand * 1.2);
+
+  /* Cubed, so each one sits dark most of the time and blinks bright briefly.
+     A plain sine gives fifty lamps all breathing gently, which reads as
+     Christmas lights rather than insects. */
+  float wave = 0.5 + 0.5 * sin(uTime * (0.8 + aBlink * 1.7) + ph);
+  vPulse = wave * wave * wave;
+  vRand = aRand;
+
+  vec4 mv = modelViewMatrix * vec4(p, 1.0);
+  gl_Position = projectionMatrix * mv;
+
+  /* One a couple of units from the lens covers a tenth of the frame and reads as
+     a smudge on the glass, not as an insect thirty feet out. Faded rather than
+     merely size-capped, because a capped disc is still a disc. */
+  vNear = smoothstep(2.0, 7.5, -mv.z);
+
+  gl_PointSize = min(
+    uSize * (0.6 + aRand * 0.7) * (0.34 + vPulse * 0.86) * uDpr * (26.0 / max(-mv.z, 0.001)),
+    20.0 * uDpr
+  );
+}
+`
+
+const FIREFLY_FRAG = /* glsl */ `
+uniform float uNight;
+
+varying float vRand;
+varying float vPulse;
+varying float vNear;
+
+void main() {
+  float r = length((gl_PointCoord - 0.5) * 2.0);
+  float core = 1.0 - smoothstep(0.0, 0.30, r);
+  float halo = exp(-r * r * 4.6);
+
+  /* Fixed tints rather than palette colours. The dusk sun stop is a cold grey
+     — correct for an overcast sky, useless as the colour of something glowing.
+     Two of them, warm and cool, because a field of identical lights looks
+     placed rather than alive. */
+  vec3 warm = vec3(1.00, 0.86, 0.54);
+  vec3 cool = vec3(0.70, 0.90, 1.00);
+  vec3 col = mix(warm, cool, step(0.66, vRand));
+
+  /* A floor under the pulse, rather than multiplying straight by it: a dim
+     baseline keeps the whole swarm faintly present and makes the blink a
+     brightening rather than an appearance. It has to stay *low* though — a wide,
+     dim disc is a soap bubble, so an unlit one shrinks (see uSize above) as well
+     as fading, and the colour stays warm instead of dropping toward grey. */
+  float a = (core * 0.95 + halo * 0.45) * (0.07 + vPulse * 0.93) * uNight * vNear;
+  if (a <= 0.003) discard;
+
+  gl_FragColor = vec4(col * (0.88 + vPulse * 0.42), a);
   #include <colorspace_fragment>
 }
 `
@@ -278,11 +370,14 @@ uniform vec3 uPetalLight;
 uniform vec3 uGrassTip;
 uniform vec3 uSun;
 uniform vec3 uHaze;
+uniform float uTint;
 
 varying float vBloom;
 varying float vFlash;
 varying float vRand;
 varying float vFog;
+
+${PETAL_TINT}
 
 void main() {
   vec2 q = (gl_PointCoord - 0.5) * 2.0;
@@ -305,7 +400,12 @@ void main() {
   vec3 bud = mix(uGrassTip, uPetal, 0.55);
   // Sparing with uPetalLight: at dusk the light stop is near-white, and leaning
   // on it made every flower a white daisy instead of the palette's own pink.
-  vec3 col = mix(bud, mix(uPetal, uPetalLight, 0.14 + vRand * 0.22), vBloom);
+  /* Only the open flower takes a hue of its own — a bud is still a green knot
+     whatever time of day it is, and the whole point of the tint is that opening
+     one is what puts colour in the field. The offset keeps a flower and the
+     petals streaming past it from landing on the same bucket every time. */
+  vec3 head = petalTint(mix(uPetal, uPetalLight, 0.14 + vRand * 0.22), fract(vRand + 0.37), uTint);
+  vec3 col = mix(bud, head, vBloom);
   // Almost no sun in the closed core, so a bud is a bud and not a glowing orb.
   col = mix(col, uSun, core * (0.08 + 0.62 * vBloom));
   // The glow: a steady halo once open, and a bright burst on the frame it opens.
@@ -650,6 +750,40 @@ function buildPetals(count: number) {
   return geo
 }
 
+/**
+ * Fireflies, scattered through the near half of the meadow and biased low so
+ * most of them hover in the grass rather than in open sky.
+ *
+ * No sort here, unlike every other layer: these draw additively, and addition
+ * does not care what order it happens in.
+ */
+function buildFireflies(count: number) {
+  const position = new Float32Array(count * 3)
+  const aRand = new Float32Array(count)
+  const aBlink = new Float32Array(count)
+
+  for (let i = 0; i < count; i++) {
+    // Starting 4 units back: anything nearer spends its life as a pale disc in
+    // the corner of the frame, and the near fade would only hide it anyway.
+    const z = NEAR_Z - 4 - (NEAR_Z + 32) * Math.pow(Math.random(), 1.4)
+    const halfX = 4 + (NEAR_Z - z) * 0.52
+    position[i * 3 + 0] = (Math.random() * 2 - 1) * halfX
+    // Biased down toward the grass, with a few stragglers up against the sky.
+    position[i * 3 + 1] = 0.35 + Math.pow(Math.random(), 1.7) * 3.1
+    position[i * 3 + 2] = z
+    aRand[i] = Math.random()
+    aBlink[i] = Math.random()
+  }
+
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(position, 3))
+  geo.setAttribute('aRand', new THREE.BufferAttribute(aRand, 1))
+  geo.setAttribute('aBlink', new THREE.BufferAttribute(aBlink, 1))
+  // They wander in the shader, so let three's own culling maths alone.
+  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 2, -14), 70)
+  return geo
+}
+
 /* ── the arc, as three.js colours ──────────────────────────────────────────── */
 
 /**
@@ -677,6 +811,7 @@ function Scene({ reduced, tier }: SceneProps) {
   // Enough that a pass opens more than one, but the touch is precise now, so the
   // meadow does not need padding to make hitting anything likely.
   const flowerCount = tier === 'high' ? 74 : 36
+  const fireflyCount = tier === 'high' ? 90 : 40
 
   const meadowGeo = useMemo(() => buildMeadow(bladeCount), [bladeCount])
   const petalGeo = useMemo(() => buildPetals(petalCount), [petalCount])
@@ -685,6 +820,7 @@ function Scene({ reduced, tier }: SceneProps) {
     [tier],
   )
   const flowers = useMemo(() => buildFlowers(flowerCount), [flowerCount])
+  const fireflyGeo = useMemo(() => buildFireflies(fireflyCount), [fireflyCount])
 
   useEffect(
     () => () => {
@@ -693,8 +829,9 @@ function Scene({ reduced, tier }: SceneProps) {
       groundGeo.dispose()
       flowers.headGeo.dispose()
       flowers.stalkGeo.dispose()
+      fireflyGeo.dispose()
     },
-    [meadowGeo, petalGeo, groundGeo, flowers],
+    [meadowGeo, petalGeo, groundGeo, flowers, fireflyGeo],
   )
 
   const stops = useMemo(buildStopColors, [])
@@ -723,6 +860,9 @@ function Scene({ reduced, tier }: SceneProps) {
     () => ({
       uPetal: { value: new THREE.Color() },
       uPetalLight: { value: new THREE.Color() },
+      /* 0 → 1 with the sunrise. At 0 every petal is the palette's own colour, so
+         the dormant field stays colourless; at 1 they fan out into a bouquet. */
+      uTint: { value: 0 },
       // Tuned against where the trail head actually sits (~6 to 28 units out).
       // The old value was set when the head hugged the camera and looked like
       // grit from this distance.
@@ -740,11 +880,78 @@ function Scene({ reduced, tier }: SceneProps) {
       ...shared,
       uPetal: petalUniforms.uPetal,
       uPetalLight: petalUniforms.uPetalLight,
+      uTint: petalUniforms.uTint,
       uSize: { value: tier === 'high' ? 16 : 18 },
       uDpr: petalUniforms.uDpr,
     }),
     [shared, petalUniforms, tier],
   )
+
+  const fireflyUniforms = useMemo(
+    () => ({
+      uTime: shared.uTime,
+      uSize: { value: tier === 'high' ? 11 : 12 },
+      uDpr: petalUniforms.uDpr,
+      /** 1 while the field is dark, 0 once the sun is properly up. */
+      uNight: { value: 1 },
+    }),
+    [shared, petalUniforms, tier],
+  )
+
+  /* ── the materials ──────────────────────────────────────────────────────────
+     Built by hand rather than declared as <shaderMaterial uniforms={...} />,
+     and that is load-bearing. R3F does not adopt a `uniforms` prop: it copies
+     each entry into the material's own uniform objects, to keep the target
+     reference stable across re-renders. Object values survive that — a Color or
+     a Vector2 is copied by reference, so mutating one in place still reaches the
+     shader — but every *number* is copied by value and then frozen for the life
+     of the material. That silently killed uTime, uGustAmp, uRing, uRingAmp and
+     uTint: the wind stood still, the cursor gust had no amplitude, clicks sent
+     no ring, and the petals never took on colour. Constructing the material
+     directly makes `material.uniforms` the very object the frame loop writes.  */
+  const materials = useMemo(() => {
+    const make = (
+      uniforms: Record<string, THREE.IUniform>,
+      vertexShader: string,
+      fragmentShader: string,
+      extra?: THREE.ShaderMaterialParameters,
+    ) =>
+      new THREE.ShaderMaterial({
+        uniforms,
+        vertexShader,
+        fragmentShader,
+        // Depth testing is off throughout — thin alpha lines and a depth buffer
+        // do not mix — so the renderOrder on each object is the sort order.
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+        ...extra,
+      })
+
+    return {
+      ground: make(shared, GROUND_VERT, GROUND_FRAG, { side: THREE.DoubleSide }),
+      grass: make(shared, GRASS_VERT, GRASS_FRAG),
+      stalk: make(shared, STALK_VERT, STALK_FRAG),
+      flower: make(flowerUniforms, FLOWER_VERT, FLOWER_FRAG),
+      // Additive, so they add light to the dark field instead of pasting discs
+      // over it — which is the whole difference between a glow and a sticker.
+      firefly: make(fireflyUniforms, FIREFLY_VERT, FIREFLY_FRAG, {
+        blending: THREE.AdditiveBlending,
+      }),
+      petal: make(petalUniforms, PETAL_VERT, PETAL_FRAG),
+    }
+  }, [shared, petalUniforms, flowerUniforms, fireflyUniforms])
+
+  useEffect(
+    () => () => {
+      for (const m of Object.values(materials)) m.dispose()
+    },
+    [materials],
+  )
+
+  // Toggled off entirely once they are invisible, rather than paying the fill
+  // cost of ninety fully transparent sprites for the whole bottom of the page.
+  const fireflyRef = useRef<THREE.Points>(null)
 
   /* The head of the petal trail, and its recent history. Petal i samples the
      history at a delay proportional to i, which is what makes the ribbon. */
@@ -878,6 +1085,19 @@ function Scene({ reduced, tier }: SceneProps) {
     shared.uWindDir.value.set(Math.cos(-0.6 + swing), Math.sin(-0.6 + swing))
     shared.uWindStrength.value = reduced ? 0.35 : 1
 
+    /* ── night and sunrise, both read off the same scroll value ──────────────
+       The two windows overlap by design: the fireflies are on their way out as
+       the first colour arrives, so there is a moment where the last of them are
+       still blinking over petals that have just started to warm. They are gone
+       before full daylight, and the tint is not fully in until after they are. */
+    const clamp01 = (x: number) => Math.min(1, Math.max(0, x))
+    const night = 1 - clamp01((tracker.bloom - 0.02) / 0.4)
+    fireflyUniforms.uNight.value = night
+    if (fireflyRef.current) fireflyRef.current.visible = night > 0.01
+    /* Fully in a little after the fireflies have gone, so the two changes read
+       as one sunrise rather than as two effects switching over at once. */
+    petalUniforms.uTint.value = clamp01((tracker.bloom - 0.12) / 0.45)
+
     /* ── palette: dusk → bloom, driven by smoothed scroll ────────────────── */
     const { lo, hi, u } = segmentAt(tracker.bloom)
     const a = stops[lo]
@@ -965,61 +1185,43 @@ function Scene({ reduced, tier }: SceneProps) {
     <>
       {/* Explicit order: depth testing is off throughout, so the only thing
           keeping earth behind grass behind petals is the sequence of draws. */}
-      <mesh geometry={groundGeo} frustumCulled={false} renderOrder={0}>
-        <shaderMaterial
-          uniforms={shared}
-          vertexShader={GROUND_VERT}
-          fragmentShader={GROUND_FRAG}
-          transparent
-          depthTest={false}
-          depthWrite={false}
-          side={THREE.DoubleSide}
-        />
-      </mesh>
+      <mesh geometry={groundGeo} material={materials.ground} frustumCulled={false} renderOrder={0} />
 
-      <lineSegments geometry={meadowGeo} frustumCulled={false} renderOrder={1}>
-        <shaderMaterial
-          uniforms={shared}
-          vertexShader={GRASS_VERT}
-          fragmentShader={GRASS_FRAG}
-          transparent
-          depthTest={false}
-          depthWrite={false}
-        />
-      </lineSegments>
+      <lineSegments
+        geometry={meadowGeo}
+        material={materials.grass}
+        frustumCulled={false}
+        renderOrder={1}
+      />
 
-      <lineSegments geometry={flowers.stalkGeo} frustumCulled={false} renderOrder={2}>
-        <shaderMaterial
-          uniforms={shared}
-          vertexShader={STALK_VERT}
-          fragmentShader={STALK_FRAG}
-          transparent
-          depthTest={false}
-          depthWrite={false}
-        />
-      </lineSegments>
+      <lineSegments
+        geometry={flowers.stalkGeo}
+        material={materials.stalk}
+        frustumCulled={false}
+        renderOrder={2}
+      />
 
-      <points geometry={flowers.headGeo} frustumCulled={false} renderOrder={3}>
-        <shaderMaterial
-          uniforms={flowerUniforms}
-          vertexShader={FLOWER_VERT}
-          fragmentShader={FLOWER_FRAG}
-          transparent
-          depthTest={false}
-          depthWrite={false}
-        />
-      </points>
+      <points
+        geometry={flowers.headGeo}
+        material={materials.flower}
+        frustumCulled={false}
+        renderOrder={3}
+      />
 
-      <points geometry={petalGeo} frustumCulled={false} renderOrder={4}>
-        <shaderMaterial
-          uniforms={petalUniforms}
-          vertexShader={PETAL_VERT}
-          fragmentShader={PETAL_FRAG}
-          transparent
-          depthTest={false}
-          depthWrite={false}
-        />
-      </points>
+      <points
+        ref={fireflyRef}
+        geometry={fireflyGeo}
+        material={materials.firefly}
+        frustumCulled={false}
+        renderOrder={4}
+      />
+
+      <points
+        geometry={petalGeo}
+        material={materials.petal}
+        frustumCulled={false}
+        renderOrder={5}
+      />
     </>
   )
 }

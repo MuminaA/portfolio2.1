@@ -117,3 +117,48 @@ mat2 rot2(float a) {
   return mat2(c, -s, s, c);
 }
 `
+
+/**
+ * Petal colour, spread around whatever hue the palette is currently on.
+ *
+ * `tint` runs 0 → 1 with the sunrise. At 0 every petal is exactly the palette's
+ * own colour, which is what keeps the dormant field colourless; as the sun comes
+ * up they fan out into a bouquet.
+ *
+ * The hue offsets are quantised into five buckets rather than taken straight
+ * from the random value. A continuous rainbow puts most petals in the muddy
+ * in-betweens — olive, teal, mauve — where five chosen hues read as deliberate.
+ * The five land on blue-violet, violet, pink, orange and gold: wide enough to
+ * be obviously several colours, and stopping short of green and true blue,
+ * which vanish into the grass and the sky respectively.
+ */
+export const PETAL_TINT = /* glsl */ `
+vec3 fw_rgb2hsv(vec3 c) {
+  vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+  vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+  vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+  float d = q.x - min(q.w, q.y);
+  return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + 1e-10)), d / (q.x + 1e-10), q.x);
+}
+
+vec3 fw_hsv2rgb(vec3 c) {
+  vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+  vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+  return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+vec3 petalTint(vec3 base, float rand, float tint) {
+  if (tint <= 0.001) return base;
+
+  vec3 hsv = fw_rgb2hsv(base);
+  float bucket = floor(rand * 5.0);
+  hsv.x = fract(hsv.x + (bucket - 2.15) * 0.115 * tint);
+  /* A grey base has no hue worth spreading, so saturation has to be *added*,
+     not scaled — at dusk the petal stop is nearly colourless on purpose. It is
+     pushed hard because these colours are mixed in linear space: a saturation of
+     0.6 there still lands as something pastel once it is encoded to sRGB. */
+  hsv.y = mix(hsv.y, clamp(hsv.y * 1.15 + 0.55, 0.0, 0.97), tint);
+  hsv.z = mix(hsv.z, min(hsv.z * 1.06 + 0.05, 1.0), tint);
+  return fw_hsv2rgb(hsv);
+}
+`
