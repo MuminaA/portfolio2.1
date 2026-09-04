@@ -72,17 +72,30 @@ float fw_noise(vec3 v) {
 /**
  * The wind. Three octaves advected along uWindDir, so gusts read as broad bands
  * travelling across the meadow rather than as local wobble.
+ *
+ * The wind runs on its own slower clock. Scaling it here rather than slowing the
+ * shared `uTime` keeps everything else on that clock at the pace it was tuned
+ * for — the firefly blink, the flower flash, the petals' noise orbits — all of
+ * which read wrong if they drift out of step with the grass. One knob, and it
+ * only moves the grass.
+ *
+ * Interpolated via toFixed, not raw: a whole number stringifies to `1`, and GLSL
+ * ES will not multiply a float by an int literal, so the shader would fail to
+ * compile and the grass would simply stop existing.
  */
+const WIND_RATE = (0.5).toFixed(3)
+
 export const WIND = /* glsl */ `
 uniform float uTime;
 uniform vec2  uWindDir;
 uniform float uWindStrength;
 
 float windAt(vec2 xz) {
-  vec2 flow = xz - uWindDir * uTime * 3.4;
-  float w  = fw_noise(vec3(flow * 0.052, uTime * 0.09));
-  w += fw_noise(vec3(flow * 0.135 + 21.0, uTime * 0.16)) * 0.50;
-  w += fw_noise(vec3(flow * 0.360 + 47.0, uTime * 0.25)) * 0.22;
+  float wt = uTime * ${WIND_RATE};
+  vec2 flow = xz - uWindDir * wt * 3.4;
+  float w  = fw_noise(vec3(flow * 0.052, wt * 0.09));
+  w += fw_noise(vec3(flow * 0.135 + 21.0, wt * 0.16)) * 0.50;
+  w += fw_noise(vec3(flow * 0.360 + 47.0, wt * 0.25)) * 0.22;
   return w * uWindStrength;
 }
 `

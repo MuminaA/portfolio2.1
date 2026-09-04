@@ -1076,7 +1076,11 @@ function Scene({ reduced, tier }: SceneProps) {
     // Flowers open where it sweeps, and stay open.
     updateFlowers(flowers, gx, scratch.target.y, gz, true, dt)
 
-    e.gustAmp += ((0.35 + tracker.speed * 1.5) - e.gustAmp) * ease(0.05)
+    /* Barely more than the resting gust, and eased in slowly. Scaling hard with
+       pointer speed meant a quick sweep hit the grass with a shove that had
+       nothing to do with the wind blowing through it — the ambient motion is the
+       thing to look at, and the cursor should join it rather than override it. */
+    e.gustAmp += ((0.32 + tracker.speed * 0.6) - e.gustAmp) * ease(0.14)
     shared.uGustAmp.value = reduced ? 0.2 : e.gustAmp
 
     /* ── click: a gust ring rolling outward across the meadow ────────────── */
