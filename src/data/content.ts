@@ -26,9 +26,9 @@ export const SECTIONS: Section[] = [
     id: 'drift',
     title: 'Drift',
     plain: 'Home',
-    // Reads true on a phone as well as a mouse — the old copy told touch users
-    // to move a cursor they do not have.
-    lede: 'Scroll, and the field comes into bloom.',
+    // Reads true on a phone as well as a mouse — the wind wanders on its own
+    // when there is no pointer, so the flowers still open.
+    lede: 'Flowers open where you pass. Scroll, and the field comes into bloom.',
     scheme: 'dusk',
   },
   {

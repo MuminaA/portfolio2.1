@@ -207,6 +207,168 @@ void main() {
 }
 `
 
+/* ── flowers ────────────────────────────────────────────────────────────────
+   The one mechanic Flower is actually built around: closed buds standing in the
+   grass that open when you sweep past, flash, and stay open afterwards. Both
+   the stem and the head stand on the shader's own groundAt(), so they cannot
+   drift off the terrain the way a CPU-computed height would.                  */
+
+const FLOWER_HEIGHT = /* glsl */ `
+// A bud sits low and lifts as it opens.
+float stemHeight(float base, float bloom) { return base * (0.62 + 0.38 * bloom); }
+`
+
+const FLOWER_VERT = /* glsl */ `
+attribute float aHeight;
+attribute float aRand;
+attribute float aBloom;
+attribute float aFlash;
+
+uniform float uSize;
+uniform float uDpr;
+uniform float uFogNear;
+uniform float uFogFar;
+
+varying float vBloom;
+varying float vFlash;
+varying float vRand;
+varying float vFog;
+
+${NOISE}
+${WIND}
+${GROUND}
+${FLOWER_HEIGHT}
+
+void main() {
+  vec2 xz = position.xz;
+  float h = stemHeight(aHeight, aBloom);
+
+  vec3 p = vec3(position.x, groundAt(xz) + h, position.z);
+  // Nods on its stem with the same wind that bends the grass.
+  p.xz += uWindDir * (windAt(xz) * 0.16 * h);
+
+  vBloom = aBloom;
+  vFlash = aFlash;
+  vRand = aRand;
+
+  vec4 mv = modelViewMatrix * vec4(p, 1.0);
+  vFog = smoothstep(uFogNear, uFogFar, -mv.z);
+  gl_Position = projectionMatrix * mv;
+
+  // Opening is a scale change as well as a shape change, with a brief
+  // overshoot on the flash so it reads as a pop rather than a fade.
+  // Capped: a flower a couple of units from the lens would otherwise be a
+  // several-hundred-pixel sprite, which reads as a blurry blob, not a flower.
+  gl_PointSize = min(
+    uSize * (0.72 + aRand * 0.56) * (0.62 + aBloom * 0.66 + aFlash * 0.30)
+      * uDpr * (26.0 / max(-mv.z, 0.001)),
+    64.0 * uDpr
+  );
+}
+`
+
+const FLOWER_FRAG = /* glsl */ `
+uniform vec3 uPetal;
+uniform vec3 uPetalLight;
+uniform vec3 uGrassTip;
+uniform vec3 uSun;
+uniform vec3 uHaze;
+
+varying float vBloom;
+varying float vFlash;
+varying float vRand;
+varying float vFog;
+
+void main() {
+  vec2 q = (gl_PointCoord - 0.5) * 2.0;
+  float r = length(q);
+  float ang = atan(q.y, q.x);
+
+  // Five lobes when open. Closed, the lobes are lerped away so the silhouette
+  // collapses to a tight round knot — a bud, not a small flower.
+  float lobes = 0.58 + 0.42 * cos(ang * 5.0 + vRand * 6.2831);
+  float edge = mix(0.48, 0.94, vBloom) * mix(1.0, lobes, vBloom);
+  // Narrow feather: near flowers are large sprites, and a wide smoothstep there
+  // is many pixels of blur — it turns the petals into smudges.
+  float m = 1.0 - smoothstep(edge - 0.13, edge, r);
+
+  float core = 1.0 - smoothstep(0.0, mix(0.12, 0.30, vBloom), r);
+  float glow = exp(-r * r * 3.0);
+
+  // Enough petal in the closed tone to stand out from the grass it is standing
+  // in — a bud the same colour as the field is a bud nobody knows to go for.
+  vec3 bud = mix(uGrassTip, uPetal, 0.55);
+  // Sparing with uPetalLight: at dusk the light stop is near-white, and leaning
+  // on it made every flower a white daisy instead of the palette's own pink.
+  vec3 col = mix(bud, mix(uPetal, uPetalLight, 0.14 + vRand * 0.22), vBloom);
+  // Almost no sun in the closed core, so a bud is a bud and not a glowing orb.
+  col = mix(col, uSun, core * (0.08 + 0.62 * vBloom));
+  // The glow: a steady halo once open, and a bright burst on the frame it opens.
+  col += uSun * glow * (vBloom * 0.20 + vFlash * 1.15);
+  col = mix(col, uHaze, vFog * 0.9);
+
+  float a = m * (0.82 + vRand * 0.18) + glow * (vBloom * 0.20 + vFlash * 0.55);
+  a *= 1.0 - smoothstep(0.80, 1.0, vFog);
+  if (a <= 0.004) discard;
+
+  gl_FragColor = vec4(col, min(a, 1.0));
+  #include <colorspace_fragment>
+}
+`
+
+const STALK_VERT = /* glsl */ `
+attribute float aTip;
+attribute float aHeight;
+attribute float aBloom;
+
+uniform float uFogNear;
+uniform float uFogFar;
+
+varying float vTip;
+varying float vBloom;
+varying float vFog;
+
+${NOISE}
+${WIND}
+${GROUND}
+${FLOWER_HEIGHT}
+
+void main() {
+  vec2 xz = position.xz;
+  float h = stemHeight(aHeight, aBloom);
+
+  vec3 p = vec3(position.x, groundAt(xz) + aTip * h, position.z);
+  // aTip gates the sway to the top vertex, so the stem pivots at the root.
+  p.xz += uWindDir * (windAt(xz) * 0.16 * h * aTip);
+
+  vTip = aTip;
+  vBloom = aBloom;
+
+  vec4 mv = modelViewMatrix * vec4(p, 1.0);
+  vFog = smoothstep(uFogNear, uFogFar, -mv.z);
+  gl_Position = projectionMatrix * mv;
+}
+`
+
+const STALK_FRAG = /* glsl */ `
+uniform vec3 uGrassBase;
+uniform vec3 uGrassTip;
+uniform vec3 uHaze;
+
+varying float vTip;
+varying float vBloom;
+varying float vFog;
+
+void main() {
+  vec3 col = mix(uGrassBase, uGrassTip, 0.35 + vTip * 0.65);
+  col = mix(col, uHaze, vFog * 0.92);
+
+  float a = (1.0 - smoothstep(0.78, 1.0, vFog)) * (0.42 + vBloom * 0.46);
+  gl_FragColor = vec4(col, a);
+  #include <colorspace_fragment>
+}
+`
+
 /* ── geometry ──────────────────────────────────────────────────────────────── */
 
 const SEGMENTS = 3
@@ -249,6 +411,137 @@ function buildMeadow(blades: number) {
   // Vertices move in the shader, so three's own culling maths cannot be trusted.
   geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, -30), 140)
   return geo
+}
+
+/** How close the pointer has to come, in world units, to open a bud. */
+const TOUCH_RADIUS = 2.6
+
+/**
+ * Buds scattered through the near half of the meadow — far enough back that
+ * they are not clipped by the lens, close enough that they are big enough to
+ * aim at. Sorted far-to-near for the same reason the blades are.
+ */
+function buildFlowers(count: number) {
+  const spots: { x: number; z: number; r: number; h: number }[] = new Array(count)
+  for (let i = 0; i < count; i++) {
+    const u = Math.random()
+    /* Kept inside what the steered petal can reach (4 to ~44 units), and
+       heavily biased near. Flowers are all about a metre tall on near-flat
+       ground, so in screen space anything past ~15 units piles into a thin band
+       at the horizon; the bias is what spreads them down the frame.            */
+    const z = 2 - 40 * Math.pow(u, 2.2)
+    const halfX = 3 + (NEAR_Z - z) * 0.62
+    spots[i] = {
+      x: (Math.random() * 2 - 1) * halfX,
+      z,
+      r: Math.random(),
+      /* Deliberately below the camera's eye (y = 1.1) and around the height of
+         the grass tips. Heads at eye level all project onto the same horizontal
+         line no matter how far away they are, which is what made them band along
+         the horizon; standing them lower is what buys the depth spread.         */
+      h: 0.5 + Math.random() * 0.42,
+    }
+  }
+  spots.sort((a, b) => a.z - b.z)
+
+  // Shared per-flower state, read by the frame loop.
+  const xs = new Float32Array(count)
+  const zs = new Float32Array(count)
+  const bloom = new Float32Array(count)
+  const flash = new Float32Array(count)
+  const open = new Uint8Array(count)
+
+  const headPos = new Float32Array(count * 3)
+  const headHeight = new Float32Array(count)
+  const headRand = new Float32Array(count)
+
+  // Two vertices per stem: root and tip.
+  const stalkPos = new Float32Array(count * 2 * 3)
+  const stalkTip = new Float32Array(count * 2)
+  const stalkHeight = new Float32Array(count * 2)
+
+  for (let i = 0; i < count; i++) {
+    const s = spots[i]
+    xs[i] = s.x
+    zs[i] = s.z
+
+    headPos[i * 3 + 0] = s.x
+    headPos[i * 3 + 2] = s.z
+    headHeight[i] = s.h
+    headRand[i] = s.r
+
+    for (let v = 0; v < 2; v++) {
+      const j = i * 2 + v
+      stalkPos[j * 3 + 0] = s.x
+      stalkPos[j * 3 + 2] = s.z
+      stalkTip[j] = v
+      stalkHeight[j] = s.h
+    }
+  }
+
+  const headGeo = new THREE.BufferGeometry()
+  headGeo.setAttribute('position', new THREE.BufferAttribute(headPos, 3))
+  headGeo.setAttribute('aHeight', new THREE.BufferAttribute(headHeight, 1))
+  headGeo.setAttribute('aRand', new THREE.BufferAttribute(headRand, 1))
+  headGeo.setAttribute('aBloom', new THREE.BufferAttribute(new Float32Array(count), 1))
+  headGeo.setAttribute('aFlash', new THREE.BufferAttribute(new Float32Array(count), 1))
+  headGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, -22), 80)
+
+  const stalkGeo = new THREE.BufferGeometry()
+  stalkGeo.setAttribute('position', new THREE.BufferAttribute(stalkPos, 3))
+  stalkGeo.setAttribute('aTip', new THREE.BufferAttribute(stalkTip, 1))
+  stalkGeo.setAttribute('aHeight', new THREE.BufferAttribute(stalkHeight, 1))
+  stalkGeo.setAttribute('aBloom', new THREE.BufferAttribute(new Float32Array(count * 2), 1))
+  stalkGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, -22), 80)
+
+  return { count, xs, zs, bloom, flash, open, headGeo, stalkGeo }
+}
+
+type Flowers = ReturnType<typeof buildFlowers>
+
+/**
+ * Opens any bud the pointer has swept over and eases the rest of them toward
+ * their current state. `open` is never cleared: in the game a bloomed flower
+ * stays bloomed, and the meadow fills in behind you as a record of where you
+ * have been.
+ */
+function updateFlowers(f: Flowers, gx: number, gz: number, live: boolean, dt: number) {
+  if (live) {
+    const r2 = TOUCH_RADIUS * TOUCH_RADIUS
+    for (let i = 0; i < f.count; i++) {
+      if (f.open[i]) continue
+      const dx = f.xs[i] - gx
+      const dz = f.zs[i] - gz
+      if (dx * dx + dz * dz < r2) {
+        f.open[i] = 1
+        f.flash[i] = 1
+      }
+    }
+  }
+
+  const rise = 1 - Math.pow(0.015, dt)
+  const fade = Math.pow(0.012, dt)
+
+  const headBloom = f.headGeo.attributes.aBloom as THREE.BufferAttribute
+  const headFlash = f.headGeo.attributes.aFlash as THREE.BufferAttribute
+  const stalkBloom = f.stalkGeo.attributes.aBloom as THREE.BufferAttribute
+  const hb = headBloom.array as Float32Array
+  const hf = headFlash.array as Float32Array
+  const sb = stalkBloom.array as Float32Array
+
+  for (let i = 0; i < f.count; i++) {
+    f.bloom[i] += ((f.open[i] ? 1 : 0) - f.bloom[i]) * rise
+    f.flash[i] *= fade
+
+    hb[i] = f.bloom[i]
+    hf[i] = f.flash[i]
+    sb[i * 2] = f.bloom[i]
+    sb[i * 2 + 1] = f.bloom[i]
+  }
+
+  headBloom.needsUpdate = true
+  headFlash.needsUpdate = true
+  stalkBloom.needsUpdate = true
 }
 
 /**
@@ -338,6 +631,7 @@ function Scene({ reduced, tier }: SceneProps) {
 
   const bladeCount = tier === 'high' ? 26000 : 9000
   const petalCount = tier === 'high' ? 110 : 52
+  const flowerCount = tier === 'high' ? 56 : 26
 
   const meadowGeo = useMemo(() => buildMeadow(bladeCount), [bladeCount])
   const petalGeo = useMemo(() => buildPetals(petalCount), [petalCount])
@@ -345,14 +639,17 @@ function Scene({ reduced, tier }: SceneProps) {
     () => (tier === 'high' ? buildGround() : buildGround(110, 78)),
     [tier],
   )
+  const flowers = useMemo(() => buildFlowers(flowerCount), [flowerCount])
 
   useEffect(
     () => () => {
       meadowGeo.dispose()
       petalGeo.dispose()
       groundGeo.dispose()
+      flowers.headGeo.dispose()
+      flowers.stalkGeo.dispose()
     },
-    [meadowGeo, petalGeo, groundGeo],
+    [meadowGeo, petalGeo, groundGeo, flowers],
   )
 
   const stops = useMemo(buildStopColors, [])
@@ -385,6 +682,20 @@ function Scene({ reduced, tier }: SceneProps) {
       uDpr: { value: Math.min(window.devicePixelRatio || 1, 1.75) },
     }),
     [tier],
+  )
+
+  /* Spreading `shared` copies the uniform *objects* by reference, so the
+     per-frame palette and wind writes reach the flowers too — only uSize and
+     uDpr are private to this material. */
+  const flowerUniforms = useMemo(
+    () => ({
+      ...shared,
+      uPetal: petalUniforms.uPetal,
+      uPetalLight: petalUniforms.uPetalLight,
+      uSize: { value: tier === 'high' ? 16 : 18 },
+      uDpr: petalUniforms.uDpr,
+    }),
+    [shared, petalUniforms, tier],
   )
 
   /* The head of the petal trail, and its recent history. Petal i samples the
@@ -441,25 +752,40 @@ function Scene({ reduced, tier }: SceneProps) {
     cam.lookAt(e.camX * 0.45, e.lookY, -22)
     shared.uCamXZ.value.set(cam.position.x, cam.position.z)
 
-    /* ── where the pointer meets the world ───────────────────────────────── */
-    const halfH = Math.tan(((cam.fov * Math.PI) / 180) / 2)
-    const D = 4.6
-    scratch.target
-      .set(ndcX * halfH * cam.aspect * D, ndcY * halfH * D, -D)
-      .applyMatrix4(cam.matrixWorld)
-    // Depth testing is off, so a petal below the earth would still be drawn on
-    // top of it. Keep the trail airborne.
-    scratch.target.y = Math.max(scratch.target.y, 0.95)
+    /* ── the petal you are steering ──────────────────────────────────────────
+       One point does all three jobs: it is the head of the petal trail, the
+       centre of the wind gust, and what opens the flowers.
 
-    // Cast that through to the ground plane for the grass gust. Above the
-    // horizon the ray never lands, so it is clamped to a distant point instead.
-    scratch.ray.copy(scratch.target).sub(cam.position).normalize()
-    const hit = scratch.ray.y < -1e-3 ? -cam.position.y / scratch.ray.y : Infinity
-    const along = Math.min(Math.max(hit, 1), 70)
-    shared.uGust.value.set(
-      cam.position.x + scratch.ray.x * along,
-      cam.position.z + scratch.ray.z * along,
-    )
+       Its distance is driven by pointer height rather than by intersecting the
+       ground. Intersecting looks principled but is useless here: the camera sits
+       1.1 units up and tilted upward, so the ray either lands two or three units
+       away or shoots off past the horizon, and there is no usable band in
+       between — the flowers were simply never within reach of it. Mapping screen
+       height to reach means low on the screen glides through the grass at your
+       feet and high on the screen sends the petal streaming out toward the
+       hills, which is both controllable and the right feeling.                 */
+    const halfH = Math.tan(((cam.fov * Math.PI) / 180) / 2)
+    const lift = Math.min(1, Math.max(0, (ndcY + 1) * 0.5))
+    const D = 4 + Math.pow(lift, 1.7) * 40
+
+    scratch.ray
+      .set(ndcX * halfH * cam.aspect, ndcY * halfH, -1)
+      .applyMatrix4(cam.matrixWorld)
+      .sub(cam.position)
+      .normalize()
+    scratch.target.copy(cam.position).addScaledVector(scratch.ray, D)
+
+    // Keep the petal gliding low over the meadow. Left alone, aiming at the sky
+    // sends it hundreds of units up; and with depth testing off, anything under
+    // the earth would still be drawn on top of it.
+    scratch.target.y = Math.min(Math.max(scratch.target.y, 0.95), 2.9)
+
+    const gx = scratch.target.x
+    const gz = scratch.target.z
+    shared.uGust.value.set(gx, gz)
+
+    // Flowers open where it sweeps, and stay open.
+    updateFlowers(flowers, gx, gz, true, dt)
 
     e.gustAmp += ((0.35 + tracker.speed * 1.5) - e.gustAmp) * ease(0.05)
     shared.uGustAmp.value = reduced ? 0.2 : e.gustAmp
@@ -561,7 +887,29 @@ function Scene({ reduced, tier }: SceneProps) {
         />
       </lineSegments>
 
-      <points geometry={petalGeo} frustumCulled={false} renderOrder={2}>
+      <lineSegments geometry={flowers.stalkGeo} frustumCulled={false} renderOrder={2}>
+        <shaderMaterial
+          uniforms={shared}
+          vertexShader={STALK_VERT}
+          fragmentShader={STALK_FRAG}
+          transparent
+          depthTest={false}
+          depthWrite={false}
+        />
+      </lineSegments>
+
+      <points geometry={flowers.headGeo} frustumCulled={false} renderOrder={3}>
+        <shaderMaterial
+          uniforms={flowerUniforms}
+          vertexShader={FLOWER_VERT}
+          fragmentShader={FLOWER_FRAG}
+          transparent
+          depthTest={false}
+          depthWrite={false}
+        />
+      </points>
+
+      <points geometry={petalGeo} frustumCulled={false} renderOrder={4}>
         <shaderMaterial
           uniforms={petalUniforms}
           vertexShader={PETAL_VERT}
