@@ -108,7 +108,10 @@ screen, not from intersecting the ground plane — with the camera at eye height
 tilted upward, that intersection is either two units away or past the horizon,
 with nothing usable in between. That distance is eased and kept to a narrow
 band, since an unsmoothed reach turns a small flick into a lurch tens of units
-down the view axis.
+down the view axis. Its height is floored but not capped — a ceiling means the
+petals cannot climb into the sky, so they can never follow the cursor over the
+top half of the screen. The floor is load-bearing: with depth testing off, a
+head that sinks under the earth still draws on top of it.
 
 **The petal trail** is a CPU ring buffer of recent head positions. Petal *i*
 samples that history at a lag proportional to *i*, so the ribbon trails behind

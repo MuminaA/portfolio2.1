@@ -756,13 +756,22 @@ function Scene({ reduced, tier }: SceneProps) {
     tracker.sy += (tracker.py - tracker.sy) * ease(0.004)
     tracker.speed *= Math.pow(0.06, dt)
 
+    /* Two pointers, deliberately. The camera drifts on the heavily smoothed one,
+       because a camera that tracks the cursor directly is nauseating. The petal
+       you are steering aims with the raw one — stacking the camera's smoothing
+       under the trail's own lag put the head nearly half a second behind the
+       cursor, which reads as the petals ignoring you.                           */
     let ndcX = tracker.sx
     let ndcY = tracker.sy
+    let aimX = tracker.px
+    let aimY = tracker.py
     if (!tracker.hasPointer) {
       // Touch, or nobody has moved yet: let the wind carry itself.
       t.idle += dt
       ndcX = Math.sin(t.idle * 0.21) * 0.62
       ndcY = Math.cos(t.idle * 0.16) * 0.42 + 0.1
+      aimX = ndcX
+      aimY = ndcY
     }
 
     /* ── camera: a slow, shallow drift. Flower's camera never snaps. ─────── */
@@ -795,20 +804,22 @@ function Scene({ reduced, tier }: SceneProps) {
        out behind it and visibly shrinks every petal — it reads as the trail
        lurching rather than following.                                          */
     const halfH = Math.tan(((cam.fov * Math.PI) / 180) / 2)
-    const lift = Math.min(1, Math.max(0, (ndcY + 1) * 0.5))
-    e.reach += (6 + Math.pow(lift, 1.4) * 22 - e.reach) * ease(0.02)
+    const lift = Math.min(1, Math.max(0, (aimY + 1) * 0.5))
+    e.reach += (8 + Math.pow(lift, 1.3) * 15 - e.reach) * ease(0.02)
 
     scratch.ray
-      .set(ndcX * halfH * cam.aspect, ndcY * halfH, -1)
+      .set(aimX * halfH * cam.aspect, aimY * halfH, -1)
       .applyMatrix4(cam.matrixWorld)
       .sub(cam.position)
       .normalize()
     scratch.target.copy(cam.position).addScaledVector(scratch.ray, e.reach)
 
-    // Keep the petal gliding low over the meadow. Left alone, aiming at the sky
-    // sends it hundreds of units up; and with depth testing off, anything under
-    // the earth would still be drawn on top of it.
-    scratch.target.y = Math.min(Math.max(scratch.target.y, 0.95), 2.9)
+    /* Floor only, no ceiling. There used to be a ceiling at 2.9, which pinned the
+       head just above the grass — the petals could never climb into the sky and so
+       could never follow the cursor over the top half of the screen, whatever it
+       did. The floor stays: with depth testing off, a head that sinks under the
+       earth still draws on top of it.                                           */
+    scratch.target.y = Math.max(scratch.target.y, 0.9)
 
     const gx = scratch.target.x
     const gz = scratch.target.z
@@ -846,7 +857,9 @@ function Scene({ reduced, tier }: SceneProps) {
     petalUniforms.uPetalLight.value.copy(a.petalLight).lerp(b.petalLight, u)
 
     /* ── the petal trail ─────────────────────────────────────────────────── */
-    t.head.lerp(scratch.target, ease(0.0015))
+    // Just enough lag to round off the corners. The trail's length comes from the
+    // history buffer below, not from making the head itself sluggish.
+    t.head.lerp(scratch.target, ease(0.0002))
 
     t.hist[t.write * 3 + 0] = t.head.x
     t.hist[t.write * 3 + 1] = t.head.y
