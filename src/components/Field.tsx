@@ -419,9 +419,9 @@ function buildMeadow(blades: number) {
 }
 
 /** How close the pointer has to come, in world units, to open a bud. */
-const TOUCH_RADIUS = 4.6
+const TOUCH_RADIUS = 2.4
 /** And how far it has to get before that flower closes again. See updateFlowers. */
-const RELEASE_RADIUS = 6.2
+const RELEASE_RADIUS = 3.4
 
 /**
  * Buds scattered through the near half of the meadow — far enough back that
@@ -432,12 +432,15 @@ function buildFlowers(count: number) {
   const spots: { x: number; z: number; r: number; h: number }[] = new Array(count)
   for (let i = 0; i < count; i++) {
     const u = Math.random()
-    /* Kept inside what the steered petal can actually reach — see `e.reach` in
-       the frame loop — and biased near. Flowers stand about knee height on
-       near-flat ground, so in screen space anything past ~15 units piles into a
-       thin band at the horizon; the bias is what spreads them down the frame.  */
-    const z = 3 - 24 * Math.pow(u, 1.9)
-    const halfX = 3 + (NEAR_Z - z) * 0.62
+    /* Kept inside the band where the petal can be flown at flower height — see
+       `e.reach` in the frame loop — and biased near. Flowers stand about knee
+       height on near-flat ground, so in screen space anything much past ten units
+       piles into a thin band at the horizon; the bias spreads them down the frame
+       and keeps them somewhere the trail can actually be steered through.       */
+    const z = 4 - 11 * Math.pow(u, 1.5)
+    // Roughly the frustum's own spread, so the edges stay inside where the petal
+    // can actually be steered rather than sitting off in the wings.
+    const halfX = 1.5 + (NEAR_Z - z) * 0.6
     spots[i] = {
       x: (Math.random() * 2 - 1) * halfX,
       z,
@@ -453,6 +456,7 @@ function buildFlowers(count: number) {
 
   // Shared per-flower state, read by the frame loop.
   const xs = new Float32Array(count)
+  const ys = new Float32Array(count)
   const zs = new Float32Array(count)
   const bloom = new Float32Array(count)
   const flash = new Float32Array(count)
@@ -471,6 +475,11 @@ function buildFlowers(count: number) {
     const s = spots[i]
     xs[i] = s.x
     zs[i] = s.z
+    /* Roughly where the head ends up. The exact height is the shader's, since the
+       terrain lives in `groundAt()` and never comes back to the CPU — so this is
+       the stem height over nominal flat ground. It is only used for the touch
+       test, where being a fraction of a unit out is invisible.                  */
+    ys[i] = s.h
 
     headPos[i * 3 + 0] = s.x
     headPos[i * 3 + 2] = s.z
@@ -501,7 +510,7 @@ function buildFlowers(count: number) {
   stalkGeo.setAttribute('aBloom', new THREE.BufferAttribute(new Float32Array(count * 2), 1))
   stalkGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, -22), 80)
 
-  return { count, xs, zs, bloom, flash, open, headGeo, stalkGeo }
+  return { count, xs, ys, zs, bloom, flash, open, headGeo, stalkGeo }
 }
 
 type Flowers = ReturnType<typeof buildFlowers>
@@ -515,17 +524,32 @@ type Flowers = ReturnType<typeof buildFlowers>
  * threshold makes any flower sitting exactly on it flicker open and shut as the
  * pointer jitters.
  */
-function updateFlowers(f: Flowers, gx: number, gz: number, live: boolean, dt: number) {
+function updateFlowers(
+  f: Flowers,
+  gx: number,
+  gy: number,
+  gz: number,
+  live: boolean,
+  dt: number,
+) {
   const openR2 = TOUCH_RADIUS * TOUCH_RADIUS
   const closeR2 = RELEASE_RADIUS * RELEASE_RADIUS
+  /* Height counts. Testing the ground footprint alone means a petal sailing ten
+     units overhead opens everything under its shadow, which is what made the
+     blooming feel untargeted — you were never on a flower, only above one. The
+     vertical axis is stretched a little because these heights are approximate
+     (see `ys` in buildFlowers), and because clipping a petal exactly through a
+     head is a harder ask than it looks at this scale.                          */
+  const yScale = 1 / 1.6
   for (let i = 0; i < f.count; i++) {
     if (!live) {
       f.open[i] = 0
       continue
     }
     const dx = f.xs[i] - gx
+    const dy = (f.ys[i] - gy) * yScale
     const dz = f.zs[i] - gz
-    const d2 = dx * dx + dz * dz
+    const d2 = dx * dx + dy * dy + dz * dz
     if (f.open[i]) {
       if (d2 > closeR2) f.open[i] = 0
     } else if (d2 < openR2) {
@@ -650,9 +674,9 @@ function Scene({ reduced, tier }: SceneProps) {
 
   const bladeCount = tier === 'high' ? 26000 : 9000
   const petalCount = tier === 'high' ? 110 : 52
-  // Dense enough that one pass opens a small cluster. A single flower per sweep
-  // reads as a hit-test, not as a meadow responding to you.
-  const flowerCount = tier === 'high' ? 96 : 44
+  // Enough that a pass opens more than one, but the touch is precise now, so the
+  // meadow does not need padding to make hitting anything likely.
+  const flowerCount = tier === 'high' ? 74 : 36
 
   const meadowGeo = useMemo(() => buildMeadow(bladeCount), [bladeCount])
   const petalGeo = useMemo(() => buildPetals(petalCount), [petalCount])
@@ -831,7 +855,7 @@ function Scene({ reduced, tier }: SceneProps) {
     shared.uGust.value.set(gx, gz)
 
     // Flowers open where it sweeps, and stay open.
-    updateFlowers(flowers, gx, gz, true, dt)
+    updateFlowers(flowers, gx, scratch.target.y, gz, true, dt)
 
     e.gustAmp += ((0.35 + tracker.speed * 1.5) - e.gustAmp) * ease(0.05)
     shared.uGustAmp.value = reduced ? 0.2 : e.gustAmp
