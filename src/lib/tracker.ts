@@ -2,8 +2,8 @@
  * A module-level mutable store for high-frequency input (pointer, scroll, clicks).
  *
  * These values change every frame, so they deliberately live outside React —
- * the WebGL field and the HUD read them inside their own animation loops and
- * nothing re-renders.
+ * the meadow, the petal trail and the palette loop all read them inside their
+ * own animation loops and nothing re-renders.
  */
 export type Tracker = {
   /** Raw pointer, normalised to -1..1 with +y up. */
@@ -12,24 +12,27 @@ export type Tracker = {
   /** Smoothed pointer, eased toward the raw value each frame. */
   sx: number
   sy: number
+  /** Pointer speed, 0..1-ish. Drives how hard the wind gusts. */
+  speed: number
   /** Document scroll progress, 0..1. */
   scroll: number
-  /** performance.now() of the last pointer press, for the shockwave ripple. */
+  /** Scroll, smoothed. The single source of truth for the dusk → bloom arc. */
+  bloom: number
+  /** performance.now() of the last pointer press, for the gust ring. */
   clickAt: number
-  /** Toggled by the konami easter egg; shifts the field palette. */
-  palette: number
-  /** True once the pointer has moved at least once (mobile never sets this). */
+  /** True once the pointer has moved at least once (touch never sets this). */
   hasPointer: boolean
 }
 
 export const tracker: Tracker = {
   px: 0,
-  py: 0,
+  py: 0.15,
   sx: 0,
-  sy: 0,
+  sy: 0.15,
+  speed: 0,
   scroll: 0,
+  bloom: 0,
   clickAt: -10_000,
-  palette: 0,
   hasPointer: false,
 }
 
@@ -39,9 +42,26 @@ export function startTracking() {
   if (started) return
   started = true
 
+  let lastX = 0
+  let lastY = 0
+  let lastT = performance.now()
+
   const onMove = (e: PointerEvent) => {
-    tracker.px = (e.clientX / window.innerWidth) * 2 - 1
-    tracker.py = -((e.clientY / window.innerHeight) * 2 - 1)
+    const x = (e.clientX / window.innerWidth) * 2 - 1
+    const y = -((e.clientY / window.innerHeight) * 2 - 1)
+
+    const now = performance.now()
+    const dt = Math.max(now - lastT, 8) / 1000
+    const travelled = Math.hypot(x - lastX, y - lastY)
+    // Blend upward fast and decay slowly, so a flick of the wrist reads as a gust.
+    tracker.speed = Math.min(1, Math.max(tracker.speed * 0.9, (travelled / dt) * 0.35))
+
+    lastX = x
+    lastY = y
+    lastT = now
+
+    tracker.px = x
+    tracker.py = y
     tracker.hasPointer = true
   }
 

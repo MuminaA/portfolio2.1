@@ -1,82 +1,47 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
-import { AnimatePresence } from 'framer-motion'
-import Achievements from './components/Achievements'
-import Boot from './components/Boot'
-import Hero from './components/Hero'
-import Hud from './components/Hud'
-import Loadout from './components/Loadout'
-import Missions from './components/Missions'
-import Profile from './components/Profile'
-import Uplink from './components/Uplink'
+import { lazy, Suspense, useEffect } from 'react'
+import Blooms from './components/Blooms'
+import Drift from './components/Drift'
+import Growth from './components/Growth'
+import Nav from './components/Nav'
+import Reach from './components/Reach'
+import Roots from './components/Roots'
+import Sky from './components/Sky'
 import { SECTIONS } from './data/content'
 import { useActiveSection } from './hooks/useActiveSection'
-import { useShortcuts } from './hooks/useShortcuts'
-import { unlock } from './lib/achievements'
-import { startTracking, tracker } from './lib/tracker'
+import { useWorldPalette } from './hooks/useWorldPalette'
+import { startTracking } from './lib/tracker'
 
 const IDS = SECTIONS.map((s) => s.id)
 
-// three.js is ~900kB of the bundle. Deferring it lets the boot sequence paint
-// immediately and downloads the renderer while the user reads the log.
+// three.js is the large majority of the bundle. Deferring it lets the sky, the
+// sun and the first screen of type paint immediately, and the meadow fades in
+// underneath them a moment later.
 const Field = lazy(() => import('./components/Field'))
 
 export default function App() {
-  // The boot sequence is a first-impression, not a toll booth — once per tab.
-  const [booted, setBooted] = useState(
-    () => sessionStorage.getItem('booted') === '1',
-  )
-
   const active = useActiveSection(IDS)
-  useShortcuts(IDS, booted)
+  useWorldPalette()
 
   useEffect(() => {
     startTracking()
   }, [])
 
-  useEffect(() => {
-    document.body.classList.toggle('is-booting', !booted)
-  }, [booted])
-
-  useEffect(() => {
-    if (!booted) return
-
-    const onDown = () => unlock('first-contact')
-    const onScroll = () => {
-      if (tracker.scroll > 0.98) unlock('full-scan')
-    }
-
-    window.addEventListener('pointerdown', onDown, { passive: true })
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => {
-      window.removeEventListener('pointerdown', onDown)
-      window.removeEventListener('scroll', onScroll)
-    }
-  }, [booted])
-
-  const finishBoot = () => {
-    sessionStorage.setItem('booted', '1')
-    setBooted(true)
-  }
-
   return (
     <>
+      <Sky />
       <Suspense fallback={null}>
         <Field />
       </Suspense>
-      <div className="overlay overlay--scan" aria-hidden="true" />
-      <div className="overlay overlay--vignette" aria-hidden="true" />
+      <div className="grain" aria-hidden="true" />
 
-      <AnimatePresence>{!booted ? <Boot onDone={finishBoot} /> : null}</AnimatePresence>
+      <Nav active={active} />
 
-      <Hud active={active} />
-      <Achievements />
-
-      <main className="main" data-live={booted}>
-        <Hero />
-        <Loadout />
-        <Missions />
-        <Profile />
-        <Uplink />
+      <main className="main">
+        <Drift />
+        <Growth />
+        <Blooms />
+        <Roots />
+        <Reach />
       </main>
     </>
   )

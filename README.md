@@ -1,8 +1,9 @@
 # Portfolio
 
-A software-engineer portfolio built as a game interface: a generative WebGL
-particle field that reacts to your cursor and scroll position, wrapped in HUD
-chrome, mission briefings and achievement toasts.
+A software-engineer portfolio built as a meadow, in the spirit of *Flower*
+(thatgamecompany, 2009): a live WebGL field of grass with wind you can steer,
+a drifting trail of petals, and almost no interface. The world opens
+desaturated at dusk and warms into full colour as you scroll.
 
 Stack: Vite + React 19 + TypeScript, three.js via `@react-three/fiber`, custom
 GLSL, Framer Motion for the DOM animation.
@@ -29,20 +30,22 @@ through them in this order:
 
 | What | Where in `content.ts` |
 | --- | --- |
-| Your name, role, tagline, bio, status | `PLAYER` |
-| Skills and the XP-bar levels | `STAT_GROUPS` |
-| Projects, briefings, metrics, links | `PROJECTS` |
-| Work / education history | `RUNS` |
+| Your name, role, tagline, bio, status | `ME` |
+| Skills and the level each stem grows to | `SKILL_GROUPS` |
+| Projects, write-ups, metrics, links | `PROJECTS` |
+| Work / education history | `HISTORY` |
 | Email, GitHub, LinkedIn, resume | `LINKS` |
+
+The five section names, ledes and their text schemes are also in there, as
+`SECTIONS`.
 
 Two more things worth changing:
 
 - **`index.html`** — the `<title>`, `description` and Open Graph tags. These are
   what show up in a Google result and in a Slack/LinkedIn link preview.
-- **`src/index.css`** — the colours are the three CSS variables `--cy`, `--mg`
-  and `--lm` at the top. The field reads matching values from
-  `src/components/Field.tsx` (`uColorA`, `uColorB`, `uColorC`) — change both so
-  the WebGL layer and the UI stay in agreement.
+- **`src/lib/palette.ts`** — the whole dusk→bloom arc, as three stops. The CSS
+  and the shaders both read this one table, so editing a hex here changes the
+  sky, the grass and the petals together. Nothing to keep in sync by hand.
 
 Links set to `href: '#'` render dimmed and non-clickable on purpose, so an
 unfinished link never looks broken.
@@ -56,7 +59,6 @@ unfinished link never looks broken.
 ### Route A — connect a GitHub repo (recommended, auto-deploys on push)
 
 ```bash
-git init
 git add -A
 git commit -m "Portfolio"
 gh repo create portfolio --public --source=. --push   # or create it on github.com
@@ -82,24 +84,44 @@ money; Vercel's hosting of it does not).
 
 ## Notes on how it works
 
-**The field** (`src/components/Field.tsx`) is two layers welded to the same
-displaced surface: a ~27k-point cloud and a coarse wireframe. Both run the same
-`fieldPoint()` GLSL function — three octaves of simplex noise, plus a travelling
-wave driven by scroll position, plus a well that follows your cursor and an
-expanding annulus on click. Additive blending, no lighting, no post-processing.
+**The meadow** (`src/components/Field.tsx`) is three layers, all sharing one
+`groundAt()` height function so they agree on where the earth is: a displaced
+ground mesh, ~26k blades of grass as `LineSegments`, and the petals as points.
+Wind is multi-octave simplex noise advected along a slowly swinging direction
+(`src/lib/glsl.ts`); your cursor adds a local gust and a click sends a ring
+rolling outward. There is no lighting and no post-processing.
 
-**Input never touches React.** Pointer position, scroll progress and click
-timestamps live in a plain mutable object (`src/lib/tracker.ts`) that the render
-loop and the HUD read directly, so nothing re-renders at 60fps.
+Depth testing is off throughout — thin alpha lines and a depth buffer do not
+mix — so **draw order is the sort order**. The blades are sorted far-to-near at
+build time, and the three layers carry explicit `renderOrder` values.
 
-**Performance.** three.js is lazy-loaded, so first paint costs ~112kB gzipped
-and the renderer downloads while the boot sequence plays. Particle count and
-point size drop automatically on narrow screens or CPUs reporting ≤4 cores.
-Device pixel ratio is capped at 1.75.
+**The petal trail** is a CPU ring buffer of recent head positions. Petal *i*
+samples that history at a lag proportional to *i*, so the ribbon trails behind
+the cursor, with a private noise orbit per petal to give it volume.
 
-**Accessibility.** `prefers-reduced-motion` slows the field to a near-standstill
-and disables the glitch and transition animations. The canvas is
-`aria-hidden` — it is decoration, and every piece of real content is ordinary
-focusable DOM. Sections are reachable by keyboard with the number keys `0`–`4`.
+**One palette, two consumers.** `src/lib/palette.ts` holds three colour stops.
+`applyWorldVars()` lerps them in sRGB and writes CSS custom properties;
+`buildStopColors()` pre-parses the same stops into `THREE.Color` and lerps them
+in linear space each frame. The horizon has no visible seam because the shader
+fades the grass into exactly the `--haze` the CSS sky is painting.
 
-**Easter egg.** ↑↑↓↓←→←→BA shifts the field palette.
+**Input never touches React.** Pointer position, scroll progress, pointer speed
+and the bloom value live in a plain mutable object (`src/lib/tracker.ts`) that
+the render loop reads directly, so nothing re-renders at 60fps.
+
+**Text contrast.** The world blooms continuously, but text colour steps per
+section via `data-scheme` (dusk / dawn / light) — a continuous ink crossfade
+would pass through mid-grey and be unreadable against a mid-tone sky. Anything
+sitting low in the frame, where the grass is thickest, gets a frosted veil
+rather than only a text halo.
+
+**Performance.** three.js is lazy-loaded, so first paint costs ~110kB gzipped
+and the renderer downloads while the first screen of type is already up. Blade
+and petal counts drop automatically on narrow screens or CPUs reporting ≤4
+cores. Device pixel ratio is capped at 1.75.
+
+**Accessibility.** `prefers-reduced-motion` slows the wind to a near-standstill
+and stills the camera. The canvas is `aria-hidden` — it is decoration, and
+every piece of real content is ordinary focusable DOM. The nav dots are real
+buttons with labels that are always available to a screen reader, revealed
+visually on hover or focus.
