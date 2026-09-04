@@ -175,7 +175,12 @@ void main() {
 
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * mv;
-  gl_PointSize = uSize * (0.62 + aRand * 0.7) * uDpr * (26.0 / max(-mv.z, 0.001));
+  // Capped so a petal drifting close to the lens stays a petal instead of
+  // becoming a screen-filling smear.
+  gl_PointSize = min(
+    uSize * (0.62 + aRand * 0.7) * uDpr * (26.0 / max(-mv.z, 0.001)),
+    30.0 * uDpr
+  );
 }
 `
 
@@ -414,7 +419,9 @@ function buildMeadow(blades: number) {
 }
 
 /** How close the pointer has to come, in world units, to open a bud. */
-const TOUCH_RADIUS = 2.6
+const TOUCH_RADIUS = 4.6
+/** And how far it has to get before that flower closes again. See updateFlowers. */
+const RELEASE_RADIUS = 6.2
 
 /**
  * Buds scattered through the near half of the meadow — far enough back that
@@ -425,11 +432,11 @@ function buildFlowers(count: number) {
   const spots: { x: number; z: number; r: number; h: number }[] = new Array(count)
   for (let i = 0; i < count; i++) {
     const u = Math.random()
-    /* Kept inside what the steered petal can reach (4 to ~44 units), and
-       heavily biased near. Flowers are all about a metre tall on near-flat
-       ground, so in screen space anything past ~15 units piles into a thin band
-       at the horizon; the bias is what spreads them down the frame.            */
-    const z = 2 - 40 * Math.pow(u, 2.2)
+    /* Kept inside what the steered petal can actually reach — see `e.reach` in
+       the frame loop — and biased near. Flowers stand about knee height on
+       near-flat ground, so in screen space anything past ~15 units piles into a
+       thin band at the horizon; the bias is what spreads them down the frame.  */
+    const z = 3 - 24 * Math.pow(u, 1.9)
     const halfX = 3 + (NEAR_Z - z) * 0.62
     spots[i] = {
       x: (Math.random() * 2 - 1) * halfX,
@@ -500,26 +507,37 @@ function buildFlowers(count: number) {
 type Flowers = ReturnType<typeof buildFlowers>
 
 /**
- * Opens any bud the pointer has swept over and eases the rest of them toward
- * their current state. `open` is never cleared: in the game a bloomed flower
- * stays bloomed, and the meadow fills in behind you as a record of where you
- * have been.
+ * Opens the buds the pointer is near and closes the ones it has left, then eases
+ * every flower toward its current state.
+ *
+ * The two radii are deliberately different: a bud opens once you are within
+ * `TOUCH_RADIUS` but only closes once you are past `RELEASE_RADIUS`. A single
+ * threshold makes any flower sitting exactly on it flicker open and shut as the
+ * pointer jitters.
  */
 function updateFlowers(f: Flowers, gx: number, gz: number, live: boolean, dt: number) {
-  if (live) {
-    const r2 = TOUCH_RADIUS * TOUCH_RADIUS
-    for (let i = 0; i < f.count; i++) {
-      if (f.open[i]) continue
-      const dx = f.xs[i] - gx
-      const dz = f.zs[i] - gz
-      if (dx * dx + dz * dz < r2) {
-        f.open[i] = 1
-        f.flash[i] = 1
-      }
+  const openR2 = TOUCH_RADIUS * TOUCH_RADIUS
+  const closeR2 = RELEASE_RADIUS * RELEASE_RADIUS
+  for (let i = 0; i < f.count; i++) {
+    if (!live) {
+      f.open[i] = 0
+      continue
+    }
+    const dx = f.xs[i] - gx
+    const dz = f.zs[i] - gz
+    const d2 = dx * dx + dz * dz
+    if (f.open[i]) {
+      if (d2 > closeR2) f.open[i] = 0
+    } else if (d2 < openR2) {
+      f.open[i] = 1
+      f.flash[i] = 1
     }
   }
 
+  // Opening is a snap and closing is a wilt. Symmetric rates make the meadow
+  // feel like it is flickering rather than responding.
   const rise = 1 - Math.pow(0.015, dt)
+  const wilt = 1 - Math.pow(0.3, dt)
   const fade = Math.pow(0.012, dt)
 
   const headBloom = f.headGeo.attributes.aBloom as THREE.BufferAttribute
@@ -530,7 +548,8 @@ function updateFlowers(f: Flowers, gx: number, gz: number, live: boolean, dt: nu
   const sb = stalkBloom.array as Float32Array
 
   for (let i = 0; i < f.count; i++) {
-    f.bloom[i] += ((f.open[i] ? 1 : 0) - f.bloom[i]) * rise
+    const want = f.open[i] ? 1 : 0
+    f.bloom[i] += (want - f.bloom[i]) * (want > f.bloom[i] ? rise : wilt)
     f.flash[i] *= fade
 
     hb[i] = f.bloom[i]
@@ -631,7 +650,9 @@ function Scene({ reduced, tier }: SceneProps) {
 
   const bladeCount = tier === 'high' ? 26000 : 9000
   const petalCount = tier === 'high' ? 110 : 52
-  const flowerCount = tier === 'high' ? 56 : 26
+  // Dense enough that one pass opens a small cluster. A single flower per sweep
+  // reads as a hit-test, not as a meadow responding to you.
+  const flowerCount = tier === 'high' ? 96 : 44
 
   const meadowGeo = useMemo(() => buildMeadow(bladeCount), [bladeCount])
   const petalGeo = useMemo(() => buildPetals(petalCount), [petalCount])
@@ -678,7 +699,10 @@ function Scene({ reduced, tier }: SceneProps) {
     () => ({
       uPetal: { value: new THREE.Color() },
       uPetalLight: { value: new THREE.Color() },
-      uSize: { value: tier === 'high' ? 2.3 : 2.4 },
+      // Tuned against where the trail head actually sits (~6 to 28 units out).
+      // The old value was set when the head hugged the camera and looked like
+      // grit from this distance.
+      uSize: { value: tier === 'high' ? 6.2 : 6.8 },
       uDpr: { value: Math.min(window.devicePixelRatio || 1, 1.75) },
     }),
     [tier],
@@ -717,7 +741,7 @@ function Scene({ reduced, tier }: SceneProps) {
   /* lookY sits well above the camera so the lens tilts *up*, dropping the
      horizon to roughly 58% of the frame. The meadow then occupies the lower
      third instead of half the page, and text has sky to sit against. */
-  const eased = useRef({ camX: 0, camY: 1.1, lookY: 3.5, gustAmp: 0 })
+  const eased = useRef({ camX: 0, camY: 1.1, lookY: 3.5, gustAmp: 0, reach: 12 })
 
   useFrame((_, delta) => {
     const dt = Math.min(delta, 1 / 20)
@@ -763,17 +787,23 @@ function Scene({ reduced, tier }: SceneProps) {
        between — the flowers were simply never within reach of it. Mapping screen
        height to reach means low on the screen glides through the grass at your
        feet and high on the screen sends the petal streaming out toward the
-       hills, which is both controllable and the right feeling.                 */
+       hills, which is both controllable and the right feeling.
+
+       Reach is eased and kept to a narrow band on purpose. An unsmoothed reach
+       over a wide range means a small flick up the screen throws the head tens of
+       units down the view axis, which barely moves on screen but whips the trail
+       out behind it and visibly shrinks every petal — it reads as the trail
+       lurching rather than following.                                          */
     const halfH = Math.tan(((cam.fov * Math.PI) / 180) / 2)
     const lift = Math.min(1, Math.max(0, (ndcY + 1) * 0.5))
-    const D = 4 + Math.pow(lift, 1.7) * 40
+    e.reach += (6 + Math.pow(lift, 1.4) * 22 - e.reach) * ease(0.02)
 
     scratch.ray
       .set(ndcX * halfH * cam.aspect, ndcY * halfH, -1)
       .applyMatrix4(cam.matrixWorld)
       .sub(cam.position)
       .normalize()
-    scratch.target.copy(cam.position).addScaledVector(scratch.ray, D)
+    scratch.target.copy(cam.position).addScaledVector(scratch.ray, e.reach)
 
     // Keep the petal gliding low over the meadow. Left alone, aiming at the sky
     // sends it hundreds of units up; and with depth testing off, anything under

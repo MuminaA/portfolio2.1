@@ -95,6 +95,21 @@ Depth testing is off throughout — thin alpha lines and a depth buffer do not
 mix — so **draw order is the sort order**. The blades are sorted far-to-near at
 build time, and the three layers carry explicit `renderOrder` values.
 
+**The flowers** are buds until something comes near, then they snap open with a
+flash and wilt shut once you leave. Two details matter: the open and close radii
+differ, or a flower sitting exactly on the threshold flickers as the pointer
+jitters; and their heads deliberately sit *below* the camera's eye, because
+anything at eye height projects onto one horizontal line regardless of distance
+and pins the whole meadow to the horizon.
+
+**One steered point** drives the trail head, the wind gust and the flowers
+together. Its distance from the camera comes from how high the pointer sits on
+screen, not from intersecting the ground plane — with the camera at eye height
+tilted upward, that intersection is either two units away or past the horizon,
+with nothing usable in between. That distance is eased and kept to a narrow
+band, since an unsmoothed reach turns a small flick into a lurch tens of units
+down the view axis.
+
 **The petal trail** is a CPU ring buffer of recent head positions. Petal *i*
 samples that history at a lag proportional to *i*, so the ribbon trails behind
 the cursor, with a private noise orbit per petal to give it volume.
