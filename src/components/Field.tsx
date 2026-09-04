@@ -805,7 +805,11 @@ function Scene({ reduced, tier }: SceneProps) {
        lurching rather than following.                                          */
     const halfH = Math.tan(((cam.fov * Math.PI) / 180) / 2)
     const lift = Math.min(1, Math.max(0, (aimY + 1) * 0.5))
-    e.reach += (8 + Math.pow(lift, 1.3) * 15 - e.reach) * ease(0.02)
+    /* The near end has to come right up to the lens. The camera sits barely a
+       unit above the grass, so a head eight units out projects near the horizon
+       however far down you point — the whole bottom of the frame is only reachable
+       from within a unit or two of the camera.                                  */
+    e.reach += (1.5 + Math.pow(lift, 1.3) * 21.5 - e.reach) * ease(0.02)
 
     scratch.ray
       .set(aimX * halfH * cam.aspect, aimY * halfH, -1)
@@ -814,12 +818,13 @@ function Scene({ reduced, tier }: SceneProps) {
       .normalize()
     scratch.target.copy(cam.position).addScaledVector(scratch.ray, e.reach)
 
-    /* Floor only, no ceiling. There used to be a ceiling at 2.9, which pinned the
-       head just above the grass — the petals could never climb into the sky and so
-       could never follow the cursor over the top half of the screen, whatever it
-       did. The floor stays: with depth testing off, a head that sinks under the
-       earth still draws on top of it.                                           */
-    scratch.target.y = Math.max(scratch.target.y, 0.9)
+    /* Floor only, no ceiling, and the floor is set low enough that it never bites
+       inside the normal range. A ceiling stopped the petals climbing into the sky;
+       a floor at grass height stopped them dropping to the bottom of the frame.
+       Both showed up as the trail refusing to leave the middle of the screen.
+       Something has to stop a runaway dive though: with depth testing off, a head
+       well under the earth still draws on top of it.                            */
+    scratch.target.y = Math.max(scratch.target.y, 0.3)
 
     const gx = scratch.target.x
     const gz = scratch.target.z
