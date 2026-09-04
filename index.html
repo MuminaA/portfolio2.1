@@ -12,13 +12,31 @@
     />
     <meta name="theme-color" content="#1e2530" />
 
+    <!--
+      Link previews. og:image and og:url must be absolute — Slack, LinkedIn and
+      iMessage all refuse a relative path — so this pair is the one place the
+      deployed domain is hard-coded. Change both if you add a custom domain.
+
+      public/og.jpg is a real 2400×1260 frame of the meadow at dusk, captured
+      from the running page rather than mocked up, so the card cannot drift out
+      of date with the site.
+    -->
     <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://portfolio2-1-kappa.vercel.app/" />
     <meta property="og:title" content="Mumina Abdi — Software Engineer" />
     <meta
       property="og:description"
       content="Software engineer. Java and Python backend services on AWS, and a meadow that blooms as you scroll."
     />
+    <meta property="og:image" content="https://portfolio2-1-kappa.vercel.app/og.jpg" />
+    <meta property="og:image:width" content="2400" />
+    <meta property="og:image:height" content="1260" />
+    <meta
+      property="og:image:alt"
+      content="A dusk meadow of grass under a dark sky, with white flowers open along a trail of drifting petals and fireflies over the field. The name Mumina Abdi is set large in the sky."
+    />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://portfolio2-1-kappa.vercel.app/og.jpg" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

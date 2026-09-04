@@ -356,8 +356,13 @@ void main() {
   // overshoot on the flash so it reads as a pop rather than a fade.
   // Capped: a flower a couple of units from the lens would otherwise be a
   // several-hundred-pixel sprite, which reads as a blurry blob, not a flower.
+  /* The closed term is deliberately small: a bud drawn near the open size is a
+     pale disc sitting in the grass, which reads as a soap bubble rather than as
+     something waiting to open — worst on a phone, where the sprite covers more
+     of a narrow frame. The two coefficients still sum to the same open size, so
+     only the closed state changes, and opening now grows as well as blooms. */
   gl_PointSize = min(
-    uSize * (0.72 + aRand * 0.56) * (0.62 + aBloom * 0.66 + aFlash * 0.30)
+    uSize * (0.72 + aRand * 0.56) * (0.40 + aBloom * 0.88 + aFlash * 0.30)
       * uDpr * (26.0 / max(-mv.z, 0.001)),
     44.0 * uDpr
   );
@@ -412,7 +417,10 @@ void main() {
   col += uSun * glow * (vBloom * 0.20 + vFlash * 1.15);
   col = mix(col, uHaze, vFog * 0.9);
 
-  float a = m * (0.82 + vRand * 0.18) + glow * (vBloom * 0.20 + vFlash * 0.55);
+  // Faded while closed for the same reason it is small — the field should read
+  // as grass with buds in it, not as grass with dots on it.
+  float a = m * (0.82 + vRand * 0.18) * mix(0.60, 1.0, vBloom)
+    + glow * (vBloom * 0.20 + vFlash * 0.55);
   a *= 1.0 - smoothstep(0.80, 1.0, vFog);
   if (a <= 0.004) discard;
 
@@ -881,7 +889,7 @@ function Scene({ reduced, tier }: SceneProps) {
       uPetal: petalUniforms.uPetal,
       uPetalLight: petalUniforms.uPetalLight,
       uTint: petalUniforms.uTint,
-      uSize: { value: tier === 'high' ? 16 : 18 },
+      uSize: { value: 16 },
       uDpr: petalUniforms.uDpr,
     }),
     [shared, petalUniforms, tier],

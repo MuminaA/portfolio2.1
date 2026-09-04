@@ -48,7 +48,12 @@ The five section names, ledes and their text schemes are also in there, as
 Two more things worth changing:
 
 - **`index.html`** — the `<title>`, `description` and Open Graph tags. These are
-  what show up in a Google result and in a Slack/LinkedIn link preview.
+  what show up in a Google result and in a Slack/LinkedIn link preview. The
+  `og:url` and `og:image` pair is the one place the deployed domain is
+  hard-coded, because those two have to be absolute URLs — change both if you
+  move to a custom domain. `public/og.jpg` is the preview card: a real 2400×1260
+  frame of the meadow, screenshotted from the running page, so re-capture it if
+  the look changes.
 - **`src/lib/palette.ts`** — the whole dusk→bloom arc, as three stops. The CSS
   and the shaders both read this one table, so editing a hex here changes the
   sky, the grass and the petals together. Nothing to keep in sync by hand.
