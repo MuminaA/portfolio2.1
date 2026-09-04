@@ -25,8 +25,14 @@ npm run preview    # serve the production build locally
 
 **Almost everything you need to change lives in one file: `src/data/content.ts`.**
 
-Every field currently holding invented copy is marked `PLACEHOLDER`. Work
-through them in this order:
+It is filled in from the résumé. What is left is marked `PLACEHOLDER`:
+
+- the `level` number on every skill — the skills are real, the numbers are an estimate
+- the GitHub link, and the `Source` links on the two Python projects
+- the résumé PDF (drop it in `public/` and point the link at `/resume.pdf`)
+- `location`, and the years for the degree
+
+The fields themselves: 
 
 | What | Where in `content.ts` |
 | --- | --- |

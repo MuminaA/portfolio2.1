@@ -1,5 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" fill="#04060c" />
-  <path d="M5 25V7h4l7 11 7-11h4v18h-4V14l-7 11-7-11v11H5z" fill="#00e5ff" />
-  <rect x="5" y="27" width="22" height="2" fill="#ff2e6b" />
+<!--
+  A five-lobed bloom on dusk sky — the same shape the flower shader draws
+  (`0.58 + 0.42 * cos(ang * 5.0)`) and the same palette stops: dusk sky
+  #1e2530, petal #ff9fb8, sun #ffcf5c, grass tip #7fbe42.
+
+  Kept to five fat lobes and one warm core because at 16px anything finer
+  turns to mush. The stem is there so it reads as a flower, not a star.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="A blooming flower">
+  <rect width="32" height="32" rx="7" fill="#1e2530" />
+  <path d="M16 21v6" stroke="#7fbe42" stroke-width="1.8" stroke-linecap="round" />
+  <g fill="#ff9fb8">
+    <!-- One petal, rotated to the five points of the shader's cos(5a) lobes. -->
+    <ellipse cx="16" cy="8.2" rx="4.5" ry="6.1" />
+    <ellipse cx="16" cy="8.2" rx="4.5" ry="6.1" transform="rotate(72 16 15)" />
+    <ellipse cx="16" cy="8.2" rx="4.5" ry="6.1" transform="rotate(144 16 15)" />
+    <ellipse cx="16" cy="8.2" rx="4.5" ry="6.1" transform="rotate(216 16 15)" />
+    <ellipse cx="16" cy="8.2" rx="4.5" ry="6.1" transform="rotate(288 16 15)" />
+  </g>
+  <circle cx="16" cy="15" r="3.8" fill="#ffcf5c" />
 </svg>
